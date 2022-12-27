@@ -1,0 +1,13 @@
+[package]
+name = "drotik"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+resvg = "0.28.0"
+quick-xml = "0.27.0"
+ndarray = "0.15.6"
+base64 = "0.20.0"
+byteorder = "1.4.3"
