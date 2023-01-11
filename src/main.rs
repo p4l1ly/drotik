@@ -20,12 +20,18 @@ const HEIGHT_OFFSET: usize = 2;
 const HEIGHT_OFFSET32: u32 = HEIGHT_OFFSET as u32;
 const ALPHA_THRESHOLD: u8 = 128;
 const STRENGTH_DECAY: f64 = 0.6;
-const COUNT_DECAY: f64 = 0.6;
+const COUNT_DECAY: f64 = 0.5;
 const FINAL_STRENGTH_DIFF_START: f64 = 2.0;
-const FINAL_STRENGTH_DIFF_DECAY: f64 = 0.6;
+const FINAL_STRENGTH_DIFF_DECAY: f64 = 0.55;
 const CUT_WIDTH: f64 = 0.3;
 const MAX_POSTFILL_DISTANCE: usize = 5;
 const MAX_OTHER_COUNT: usize = 2;
+const ITERATIONS: usize = 2;
+
+const X1: usize = 0;
+const X2: usize = WIDTH as usize;
+const Z1: usize = 0;
+const Z2: usize = DEPTH as usize;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Constraint {
@@ -41,11 +47,13 @@ enum Constraint {
     BlueMustnt,
 }
 
-// cervena nepojde do RedMustnt ale v BlueMustnt je vzdy (nema jej tam co konkurovat).
-// pozor ale na to ze tadial moze robit tunely.
-// riesenie:
-// - Red sa moze v BlueMustnt sirit iba horizontalne
-// - Zaver: BlueMustnt sa povazuje za Red ak je aspon na jednom jeho horizontalnom okraji Red
+// TODO
+// - option: nacitat z vti alebo zo svg
+//   --svg path1 path2 path3 path4
+//   --vti path
+// - po kazdej iteracii zapisat do suboru
+//   --out out1 out2 out3 ...
+// - urobit vysek --x1 --x2 --z1 --z2
 
 use Constraint::*;
 
@@ -178,11 +186,13 @@ fn main() {
     let depth = DEPTH as usize;
 
     // create basic constraints
-    apply_path(&mut tree, &mut constraints, 0.8, 0);
-    apply_path(&mut tree, &mut constraints, 0.4, 1);
+    apply_path(&mut tree, &mut constraints, 1.4, 0);
+    apply_path(&mut tree, &mut constraints, 1.1, 1);
+    apply_path(&mut tree, &mut constraints, 0.5, 2);
 
-    apply_path(&mut tree1, &mut constraints, 0.8, depth - 1);
-    apply_path(&mut tree1, &mut constraints, 0.4, depth - 2);
+    apply_path(&mut tree1, &mut constraints, 1.4, depth - 1);
+    apply_path(&mut tree1, &mut constraints, 1.1, depth - 2);
+    apply_path(&mut tree1, &mut constraints, 0.5, depth - 3);
 
     constraints.slice_mut(s![.., 0..2, ..]).fill(BlueMust);
     constraints.slice_mut(s![.., height - 2 .. height, ..]).fill(RedMust);
@@ -192,10 +202,10 @@ fn main() {
 
     let add_neighbours = |pos: Dim, target: &mut Vec<Dim>| {
         let (xm, ym, zm) = pos;
-        if xm > 0 {
+        if xm > X1 {
             target.push((xm - 1, ym, zm));
         }
-        if xm < width - 1 {
+        if xm < X2 - 1 {
             target.push((xm + 1, ym, zm));
         }
         if ym > 0 {
@@ -204,38 +214,38 @@ fn main() {
         if ym < height - 1 {
             target.push((xm, ym + 1, zm));
         }
-        if zm > 0 {
+        if zm > Z1 {
             target.push((xm, ym, zm - 1));
         }
-        if zm < depth - 1 {
+        if zm < Z2 - 1 {
             target.push((xm, ym, zm + 1));
         }
     };
 
     let add_horizontal_neighbours = |pos: Dim, target: &mut Vec<Dim>| {
         let (xm, ym, zm) = pos;
-        if xm > 0 {
+        if xm > X1 {
             target.push((xm - 1, ym, zm));
         }
-        if xm < width - 1 {
+        if xm < X2 - 1 {
             target.push((xm + 1, ym, zm));
         }
-        if zm > 0 {
+        if zm > Z1 {
             target.push((xm, ym, zm - 1));
         }
-        if zm < depth - 1 {
+        if zm < Z2 - 1 {
             target.push((xm, ym, zm + 1));
         }
     };
 
     // A*
     {
-        for iteration in 0..2 {
+        for iteration in 0..ITERATIONS {
             // Count generators
             let mut origin_count = 0;
-            for x in 0..(WIDTH as usize) {
-                for y in 0..(height as usize) {
-                    for z in 0..(DEPTH as usize) {
+            for x in X1..X2 {
+                for y in 0..height {
+                    for z in Z1..Z2 {
                         if constraints[(x, y, z)] == BlueMust ||
                             constraints[(x, y, z)] == RedMust {
                             origin_count += 1;
@@ -247,9 +257,9 @@ fn main() {
             let mut jobs = vec![];
 
             // Perform A*
-            for x in 0..width {
+            for x in X1..X2 {
                 for y in 0..height {
-                    for z in 0..depth {
+                    for z in Z1..Z2 {
                         for (generator, constr1, constr2, signum, my_mustnt, other_postfill, other_mustnt, my_postfill) in [
                             (BlueMust, RedMust, RedArea, 1.0, BlueMustnt, RedPostfill, RedMustnt, BluePostfill),
                             (RedMust, BlueMust, BlueArea, -1.0, RedMustnt, BluePostfill, BlueMustnt, RedPostfill),
@@ -298,7 +308,7 @@ fn main() {
                                             if visited[pos] { continue; }
                                             visited[pos] = true;
                                             let constr = constraints[pos];
-                                            if constr == Mustnt || constr == constr1 || constr == constr2 {
+                                            if constr == Mustnt || constr == my_mustnt || constr == other_postfill || constr == constr1 || constr == constr2 {
                                                 final_strength *= 1.0 + final_strength_diff;
                                             }
                                             if constr == Mustnt { continue; }
@@ -341,8 +351,8 @@ fn main() {
             let (astar_raster, _) = mutexed.into_inner().unwrap();
 
             // Count areas
-            for x in 0..width {
-                for z in 0..depth {
+            for x in X1..X2 {
+                for z in Z1..Z2 {
                     let mut nonblue = false;
                     for y in 0..height {
                         let constr = constraints[(x, y, z)];
@@ -370,8 +380,8 @@ fn main() {
 
     // Final RedMustnt and BlueMustnt removal.
     for y in 0..height {
-        for z in 0..depth {
-            'nextpt: for x in 0..width {
+        for z in Z1..Z2 {
+            'nextpt: for x in X1..X2 {
                 let constr = constraints[(x, y, z)];
                 if constr == RedMustnt {
                     let mut visited = Array3::from_elem(dims, false);
